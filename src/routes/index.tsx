@@ -1,24 +1,63 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useEffect } from "react";
+import { markup } from "@/lib/bilbobus-markup";
 
-// No head() here: the home route inherits title/description/og/twitter from
-// __root.tsx, and ships no og:image so serve-time hosting can inject the
-// project's social preview (explicit og:image or latest screenshot).
 export const Route = createFileRoute("/")({
+  head: () => ({
+    meta: [
+      { title: "Bilbobus · Control de horas" },
+      {
+        name: "description",
+        content:
+          "Registra jornadas, controla contratos y exporta informes PDF de tus horas en Bilbobus.",
+      },
+      { property: "og:title", content: "Bilbobus · Control de horas" },
+      {
+        property: "og:description",
+        content:
+          "Registra jornadas, controla contratos y exporta informes PDF de tus horas en Bilbobus.",
+      },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
+      { name: "theme-color", content: "#9e0b12" },
+    ],
+    links: [{ rel: "stylesheet", href: "/bilbobus/styles.css" }],
+  }),
   component: Index,
 });
 
-// IMPORTANT: Replace this placeholder. See ./README.md for routing conventions.
+function loadScript(src: string) {
+  return new Promise<void>((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${src}"]`);
+    if (existing) return resolve();
+    const el = document.createElement("script");
+    el.src = src;
+    el.onload = () => resolve();
+    el.onerror = () => reject(new Error(src));
+    document.head.appendChild(el);
+  });
+}
+
 function Index() {
-  return (
-    <div
-      className="flex min-h-screen items-center justify-center"
-      style={{ backgroundColor: "#fcfbf8" }}
-    >
-      <img
-        data-lovable-blank-page-placeholder="REMOVE_THIS"
-        src="https://cdn.gpteng.co/blank-app-v1.svg"
-        alt="Your app will live here!"
-      />
-    </div>
-  );
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        await loadScript(
+          "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js",
+        );
+        await loadScript(
+          "https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js",
+        );
+      } catch {
+        /* PDF opcional */
+      }
+      if (!cancelled) await loadScript("/bilbobus/app.js");
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return <div dangerouslySetInnerHTML={{ __html: markup }} />;
 }
