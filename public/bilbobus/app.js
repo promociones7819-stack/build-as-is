@@ -2,6 +2,7 @@
 
 const STORAGE_KEY = 'bilbobus_hours_dashboard_v1';
 const DOW = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+const PAYROLL_DEFAULTS = { base: 47.14, complement: 12.18, settlement: 3.23, cash: 1.26, saturday: 25.70, nightDay: 14.10, holiday: 51.47, nightHour: 3.21, splitDinner: 10.09 };
 const $ = (id) => document.getElementById(id);
 let state = loadState();
 let currentMonday = startISOWeek(new Date());
@@ -10,7 +11,7 @@ let toastTimer;
 let folderHandle = null;
 let folderSaveTimer;
 
-function emptyState() { return { contracts: [], days: {} }; }
+function emptyState() { return { contracts: [], days: {}, payroll: { ...PAYROLL_DEFAULTS } }; }
 
 function normalizeState(value) {
   const clean = emptyState();
@@ -34,6 +35,7 @@ function normalizeState(value) {
       };
     });
   }
+  if (value.payroll && typeof value.payroll === 'object') Object.keys(PAYROLL_DEFAULTS).forEach((key) => { clean.payroll[key] = parseDecimal(value.payroll[key] ?? PAYROLL_DEFAULTS[key]); });
   return clean;
 }
 
@@ -113,6 +115,17 @@ function interval(start, end) {
   return last - first;
 }
 function entryMinutes(entry) { return entry ? interval(entry.start1, entry.end1) + interval(entry.start2, entry.end2) : 0; }
+function intervalNightMinutes(start, end) {
+  const first = clockMinutes(start); let last = clockMinutes(end); if (first === null || last === null) return 0;
+  if (last < first) last += 1440;
+  let total = 0;
+  for (let day = -1; day <= 2; day += 1) {
+    const from = day * 1440 + 1320; const to = day * 1440 + 1800;
+    total += Math.max(0, Math.min(last, to) - Math.max(first, from));
+  }
+  return total;
+}
+function entryNightMinutes(entry) { return entry ? intervalNightMinutes(entry.start1, entry.end1) + intervalNightMinutes(entry.start2, entry.end2) : 0; }
 function validateEntry(entry) {
   if (clockMinutes(entry.start1) === null || clockMinutes(entry.end1) === null) return 'Completa la entrada y la salida del tramo 1.';
   if (entry.start1 === entry.end1) return 'La entrada y la salida del tramo 1 no pueden coincidir.';
@@ -140,7 +153,7 @@ function preferredContract() {
   return past || state.contracts.filter((c) => c.start > today).sort((a, b) => a.start.localeCompare(b.start))[0] || null;
 }
 
-function render() { renderSummary(); renderWeek(); renderRecent(); renderContracts(); renderReports(); }
+function render() { renderSummary(); renderWeek(); renderRecent(); renderContracts(); renderReports(); renderPayroll(); }
 
 function renderSummary() {
   const contract = preferredContract();
@@ -192,6 +205,23 @@ function renderReports() {
 }
 function updateReportPreview() { const contract = state.contracts.find((c) => c.id === $('reportContract').value); if (!contract) { $('reportPreview').textContent = 'Crea un contrato para poder generar informes.'; return; } const target = contractTarget(contract); const worked = contractWorked(contract); const difference = worked - target; $('reportPreview').innerHTML = `Contratadas: <strong>${sex(target)}</strong> · Realizadas: <strong>${sex(worked)}</strong> · Diferencia: <strong class="${difference >= 0 ? 'positive' : 'negative'}">${difference > 0 ? '+' : ''}${sex(difference)}</strong>`; }
 
+function money(value) { return value.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €'; }
+function payrollMonthBounds(value) { const [year, month] = value.split('-').map(Number); const start = `${year}-${pad(month)}-01`; const last = new Date(year, month, 0).getDate(); return { start, end: `${year}-${pad(month)}-${pad(last)}` }; }
+function renderPayroll() {
+  const month = $('payrollMonth').value || dateKey(new Date()).slice(0, 7); $('payrollMonth').value = month;
+  const { start, end } = payrollMonthBounds(month); const entries = Object.entries(state.days).filter(([key]) => key >= start && key <= end && entryMinutes(state.days[key]) > 0);
+  const workedDays = entries.length; const workedMinutes = entries.reduce((sum, [, entry]) => sum + entryMinutes(entry), 0); const nightMinutes = entries.reduce((sum, [, entry]) => sum + entryNightMinutes(entry), 0);
+  const nightDays = entries.filter(([, entry]) => entryNightMinutes(entry) > 0).length; const saturdays = entries.filter(([key]) => parseKey(key).getDay() === 6).length; const splitDays = entries.filter(([, entry]) => entry.start2 && entry.end2).length;
+  const lines = [
+    ['0001', 'SALARIO BASE', 'base', workedDays], ['0011', 'COMPLEMENTO SALARIAL', 'complement', workedDays], ['0063', 'LIQUIDACIÓN Y JORNADA CON', 'settlement', workedDays], ['00A2', 'QUEBRANTO DE MONEDA', 'cash', workedDays],
+    ['1074', 'PLUS SÁBADO', 'saturday', saturdays], ['10M7', 'PLUS NOCTURNIDAD', 'nightDay', nightDays], ['10M9', 'FESTIVOS', 'holiday', 0], ['10N3', 'HORAS NOCTURNAS', 'nightHour', nightMinutes / 60], ['1455', 'DIETAS CENA JORN. PARTIDA', 'splitDinner', splitDays]
+  ];
+  let gross = 0;
+  $('payrollLines').innerHTML = lines.map(([code, label, key, quantity]) => { const amount = state.payroll[key] * quantity; gross += amount; return `<tr><td>${code}</td><td>${label}</td><td><label class="price-field"><span class="sr-only">Precio ${label}</span><input data-payroll-price="${key}" inputmode="decimal" value="${String(state.payroll[key]).replace('.', ',')}"></label></td><td>${quantity.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td><td><strong>${money(amount)}</strong></td></tr>`; }).join('');
+  $('payrollStats').innerHTML = `<article><span>Días trabajados</span><strong>${workedDays}</strong></article><article><span>Horas trabajadas</span><strong>${sexNoH(workedMinutes)}</strong></article><article><span>Horas nocturnas</span><strong>${sexNoH(nightMinutes)}</strong></article><article><span>Días con nocturnidad</span><strong>${nightDays}</strong></article>`;
+  $('payrollGross').textContent = money(gross);
+}
+
 function showModal(id) { lastFocusedElement = document.activeElement; const modal = $(id); modal.hidden = false; document.body.style.overflow = 'hidden'; modal.querySelector('input:not([type="hidden"]), button')?.focus(); }
 function hideModal(id) { $(id).hidden = true; if (![...document.querySelectorAll('.modal')].some((m) => !m.hidden)) document.body.style.overflow = ''; lastFocusedElement?.focus?.(); }
 function showToast(message) { clearTimeout(toastTimer); $('toast').textContent = message; $('toast').classList.add('show'); toastTimer = setTimeout(() => $('toast').classList.remove('show'), 2800); }
@@ -232,6 +262,8 @@ $('dayForm').addEventListener('submit', saveDay); $('deleteDay').addEventListene
 ['contractStart', 'contractEnd', 'contractWeekly'].forEach((id) => $(id).addEventListener('input', updateContractPreview));
 ['start1', 'end1', 'start2', 'end2'].forEach((id) => $(id).addEventListener('input', updateDayPreview));
 $('reportContract').addEventListener('change', updateReportPreview); $('exportPdf').addEventListener('click', () => exportPdf());
+$('payrollMonth').addEventListener('change', renderPayroll);
+document.addEventListener('change', (event) => { const key = event.target.dataset.payrollPrice; if (!key) return; state.payroll[key] = parseDecimal(event.target.value); persist(); renderPayroll(); });
 $('backupData').addEventListener('click', backupData); $('restoreData').addEventListener('change', restoreData);
 $('chooseFolder').addEventListener('click', chooseFolder); $('saveFolderNow').addEventListener('click', () => writeFolderCopy({ requestPermission: true })); $('disconnectFolder').addEventListener('click', disconnectFolder);
 
