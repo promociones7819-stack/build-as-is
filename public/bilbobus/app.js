@@ -11,7 +11,7 @@ let toastTimer;
 let folderHandle = null;
 let folderSaveTimer;
 
-function emptyState() { return { contracts: [], days: {}, payroll: { ...PAYROLL_DEFAULTS } }; }
+function emptyState() { return { contracts: [], days: {}, payroll: { ...PAYROLL_DEFAULTS }, payrollQuantities: {}, holidays: [] }; }
 
 function normalizeState(value) {
   const clean = emptyState();
@@ -36,6 +36,8 @@ function normalizeState(value) {
     });
   }
   if (value.payroll && typeof value.payroll === 'object') Object.keys(PAYROLL_DEFAULTS).forEach((key) => { clean.payroll[key] = parseDecimal(value.payroll[key] ?? PAYROLL_DEFAULTS[key]); });
+  if (value.payrollQuantities && typeof value.payrollQuantities === 'object' && !Array.isArray(value.payrollQuantities)) clean.payrollQuantities = value.payrollQuantities;
+  if (Array.isArray(value.holidays)) clean.holidays = value.holidays.filter((item) => item && validDateKey(String(item.date || ''))).map((item) => ({ date: String(item.date), name: String(item.name || 'Festivo') }));
   return clean;
 }
 
@@ -212,15 +214,21 @@ function renderPayroll() {
   const { start, end } = payrollMonthBounds(month); const entries = Object.entries(state.days).filter(([key]) => key >= start && key <= end && entryMinutes(state.days[key]) > 0);
   const workedDays = entries.length; const workedMinutes = entries.reduce((sum, [, entry]) => sum + entryMinutes(entry), 0); const nightMinutes = entries.reduce((sum, [, entry]) => sum + entryNightMinutes(entry), 0);
   const nightDays = entries.filter(([, entry]) => entryNightMinutes(entry) > 0).length; const saturdays = entries.filter(([key]) => parseKey(key).getDay() === 6).length; const splitDays = entries.filter(([, entry]) => entry.start2 && entry.end2).length;
+  const holidayDates = new Set(state.holidays.map((item) => item.date)); const festiveDays = entries.filter(([key]) => parseKey(key).getDay() === 0 || holidayDates.has(key)).length;
   const lines = [
     ['0001', 'SALARIO BASE', 'base', workedDays], ['0011', 'COMPLEMENTO SALARIAL', 'complement', workedDays], ['0063', 'LIQUIDACIÓN Y JORNADA CON', 'settlement', workedDays], ['00A2', 'QUEBRANTO DE MONEDA', 'cash', workedDays],
-    ['1074', 'PLUS SÁBADO', 'saturday', saturdays], ['10M7', 'PLUS NOCTURNIDAD', 'nightDay', nightDays], ['10M9', 'FESTIVOS', 'holiday', 0], ['10N3', 'HORAS NOCTURNAS', 'nightHour', nightMinutes / 60], ['1455', 'DIETAS CENA JORN. PARTIDA', 'splitDinner', splitDays]
+    ['1074', 'PLUS SÁBADO', 'saturday', saturdays], ['10M7', 'PLUS NOCTURNIDAD', 'nightDay', nightDays], ['10M9', 'FESTIVOS', 'holiday', festiveDays], ['10N3', 'HORAS NOCTURNAS', 'nightHour', nightMinutes / 60], ['1455', 'DIETAS CENA JORN. PARTIDA', 'splitDinner', splitDays]
   ];
+  const overrides = state.payrollQuantities[month] || {};
   let gross = 0;
-  $('payrollLines').innerHTML = lines.map(([code, label, key, quantity]) => { const amount = state.payroll[key] * quantity; gross += amount; return `<tr><td>${code}</td><td>${label}</td><td><label class="price-field"><span class="sr-only">Precio ${label}</span><input data-payroll-price="${key}" inputmode="decimal" value="${String(state.payroll[key]).replace('.', ',')}"></label></td><td>${quantity.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td><td><strong>${money(amount)}</strong></td></tr>`; }).join('');
+  $('payrollLines').innerHTML = lines.map(([code, label, key, automatic]) => { const quantity = Object.hasOwn(overrides, key) ? parseDecimal(overrides[key]) : automatic; const amount = state.payroll[key] * quantity; gross += amount; return `<tr><td>${code}</td><td>${label}<small class="auto-hint">Auto: ${automatic.toLocaleString('es-ES', { maximumFractionDigits: 2 })}</small></td><td><label class="price-field"><span class="sr-only">Precio ${label}</span><input data-payroll-price="${key}" inputmode="decimal" value="${String(state.payroll[key]).replace('.', ',')}"></label></td><td><label class="quantity-field"><span class="sr-only">Cantidad ${label}</span><input data-payroll-quantity="${key}" inputmode="decimal" value="${String(quantity).replace('.', ',')}"></label></td><td><strong>${money(amount)}</strong></td></tr>`; }).join('');
   $('payrollStats').innerHTML = `<article><span>Días trabajados</span><strong>${workedDays}</strong></article><article><span>Horas trabajadas</span><strong>${sexNoH(workedMinutes)}</strong></article><article><span>Horas nocturnas</span><strong>${sexNoH(nightMinutes)}</strong></article><article><span>Días con nocturnidad</span><strong>${nightDays}</strong></article>`;
   $('payrollGross').textContent = money(gross);
+  renderHolidays(month);
 }
+function renderHolidays(month) { const year = month.slice(0, 4); const items = state.holidays.filter((item) => item.date.startsWith(year)).sort((a, b) => a.date.localeCompare(b.date)); $('holidayDate').min = `${year}-01-01`; $('holidayDate').max = `${year}-12-31`; $('holidayList').innerHTML = items.length ? items.map((item) => `<span class="holiday-chip">${fmtDate(item.date)} · ${esc(item.name)}<button type="button" data-remove-holiday="${item.date}" aria-label="Eliminar festivo ${esc(item.name)}">×</button></span>`).join('') : '<span class="muted">No hay festivos adicionales para este año.</span>'; }
+function addHoliday() { const date = $('holidayDate').value; const name = $('holidayName').value.trim() || 'Festivo'; if (!validDateKey(date)) { showToast('Selecciona una fecha festiva válida.'); return; } const existing = state.holidays.find((item) => item.date === date); if (existing) existing.name = name; else state.holidays.push({ date, name }); $('holidayDate').value = ''; $('holidayName').value = ''; persist(); renderPayroll(); showToast('Festivo guardado.'); }
+function savePayrollAdjustments() { const month = $('payrollMonth').value; state.payrollQuantities[month] ||= {}; document.querySelectorAll('[data-payroll-price]').forEach((input) => { state.payroll[input.dataset.payrollPrice] = parseDecimal(input.value); }); document.querySelectorAll('[data-payroll-quantity]').forEach((input) => { state.payrollQuantities[month][input.dataset.payrollQuantity] = parseDecimal(input.value); }); persist(); renderPayroll(); showToast('Precios y cantidades guardados.'); }
 
 function showModal(id) { lastFocusedElement = document.activeElement; const modal = $(id); modal.hidden = false; document.body.style.overflow = 'hidden'; modal.querySelector('input:not([type="hidden"]), button')?.focus(); }
 function hideModal(id) { $(id).hidden = true; if (![...document.querySelectorAll('.modal')].some((m) => !m.hidden)) document.body.style.overflow = ''; lastFocusedElement?.focus?.(); }
@@ -263,7 +271,11 @@ $('dayForm').addEventListener('submit', saveDay); $('deleteDay').addEventListene
 ['start1', 'end1', 'start2', 'end2'].forEach((id) => $(id).addEventListener('input', updateDayPreview));
 $('reportContract').addEventListener('change', updateReportPreview); $('exportPdf').addEventListener('click', () => exportPdf());
 $('payrollMonth').addEventListener('change', renderPayroll);
-document.addEventListener('change', (event) => { const key = event.target.dataset.payrollPrice; if (!key) return; state.payroll[key] = parseDecimal(event.target.value); persist(); renderPayroll(); });
+document.addEventListener('focusout', (event) => { const priceKey = event.target.dataset.payrollPrice; if (priceKey) { state.payroll[priceKey] = parseDecimal(event.target.value); persist(); renderPayroll(); return; } const quantityKey = event.target.dataset.payrollQuantity; if (quantityKey) { const month = $('payrollMonth').value; state.payrollQuantities[month] ||= {}; state.payrollQuantities[month][quantityKey] = parseDecimal(event.target.value); persist(); renderPayroll(); } });
+$('addHoliday').addEventListener('click', addHoliday);
+$('savePayrollAdjustments').addEventListener('click', savePayrollAdjustments);
+$('resetPayrollQuantities').addEventListener('click', () => { delete state.payrollQuantities[$('payrollMonth').value]; persist(); renderPayroll(); showToast('Cantidades automáticas restauradas.'); });
+document.addEventListener('click', (event) => { const date = event.target.dataset.removeHoliday; if (!date) return; state.holidays = state.holidays.filter((item) => item.date !== date); persist(); renderPayroll(); });
 $('backupData').addEventListener('click', backupData); $('restoreData').addEventListener('change', restoreData);
 $('chooseFolder').addEventListener('click', chooseFolder); $('saveFolderNow').addEventListener('click', () => writeFolderCopy({ requestPermission: true })); $('disconnectFolder').addEventListener('click', disconnectFolder);
 
