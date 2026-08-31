@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#9e0b12" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'none'"
+    />
+    <title>Bilbobus · Control de horas</title>
+    <link rel="stylesheet" href="../public/bilbobus/styles.css" />
+    <script defer src="vendor/jspdf.umd.min.js"></script>
+    <script defer src="vendor/jspdf.plugin.autotable.min.js"></script>
+    <script defer src="../public/bilbobus/app.js"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <header class="brand">
+          <h1>Bilbobus</h1>
+          <p>Nos movemos<br /><strong>contigo</strong></p>
+        </header>
+        <nav class="nav" aria-label="Navegación principal">
+          <button class="active" data-view="summary" aria-current="page">
+            <span aria-hidden="true">◉</span><span>Resumen</span>
+          </button>
+          <button data-view="calendar">
+            <span aria-hidden="true">▣</span><span>Calendario</span>
+          </button>
+          <button data-view="contracts">
+            <span aria-hidden="true">▤</span><span>Contratos</span>
+          </button>
+          <button data-view="reports">
+            <span aria-hidden="true">▥</span><span>Informes</span>
+          </button>
+          <button data-view="payroll"><span aria-hidden="true">€</span><span>Nómina</span></button>
+          <button data-view="settings">
+            <span aria-hidden="true">⚙</span><span>Ajustes</span>
+          </button>
+        </nav>
+        <p class="storage-note">Los datos se guardan únicamente en este Mac.</p>
+      </aside>
+
+      <main class="main">
+        <section id="summaryView" class="view active" aria-labelledby="summaryTitle">
+          <div class="panel panel-pad" id="summaryContent"></div>
+          <section class="panel dark-panel recent-panel">
+            <div class="section-heading">
+              <h2>Últimos días registrados</h2>
+              <button class="button subtle" id="addToday">＋ Añadir hoy</button>
+            </div>
+            <div id="recentDays"></div>
+          </section>
+        </section>
+
+        <section id="calendarView" class="view" aria-labelledby="calendarTitle">
+          <div class="panel dark-panel calendar-panel">
+            <header class="week-head">
+              <div class="eyebrow" id="weekTitle"></div>
+              <h2 id="calendarTitle">Calendario semanal</h2>
+              <div class="week-nav">
+                <button id="prevWeek" aria-label="Semana anterior">← <span>Anterior</span></button>
+                <div id="weekRange" class="week-range"></div>
+                <button id="nextWeek"><span>Siguiente</span> →</button>
+                <button id="currentWeek">Semana actual</button>
+              </div>
+              <div id="weekContractInfo" class="week-contract"></div>
+            </header>
+            <div id="daysGrid" class="days"></div>
+            <div class="week-total">
+              <span>Total semana</span><strong id="weekTotal"></strong
+              ><span id="weekTotalDec" class="muted"></span>
+            </div>
+          </div>
+        </section>
+
+        <section id="contractsView" class="view" aria-labelledby="contractsTitle">
+          <div class="panel dark-panel section-panel">
+            <div class="section-heading">
+              <div>
+                <span class="eyebrow">Histórico completo</span>
+                <h2 id="contractsTitle">Contratos</h2>
+              </div>
+              <button class="button primary" id="newContract">＋ Nuevo contrato</button>
+            </div>
+            <div id="contractsList" class="contracts-list"></div>
+          </div>
+        </section>
+
+        <section id="reportsView" class="view" aria-labelledby="reportsTitle">
+          <div class="panel dark-panel section-panel narrow-panel">
+            <span class="eyebrow">Exportación</span>
+            <h2 id="reportsTitle">Informes</h2>
+            <p class="muted">
+              Selecciona un contrato para generar un PDF con su resumen y todas las jornadas del
+              periodo.
+            </p>
+            <label for="reportContract">Contrato</label>
+            <select id="reportContract"></select>
+            <div id="reportPreview" class="preview"></div>
+            <button class="button primary wide" id="exportPdf">▤ Exportar informe PDF</button>
+          </div>
+        </section>
+
+        <section id="payrollView" class="view" aria-labelledby="payrollTitle">
+          <div class="panel dark-panel section-panel payroll-panel">
+            <div class="section-heading payroll-heading">
+              <div>
+                <span class="eyebrow">Estimación mensual</span>
+                <h2 id="payrollTitle">Nómina</h2>
+              </div>
+              <label class="month-field">Mes<input id="payrollMonth" type="month" /></label>
+            </div>
+            <p class="muted payroll-note">
+              Cálculo orientativo basado en las jornadas registradas. Las horas nocturnas se cuentan
+              automáticamente entre las 22:00 y las 06:00.
+            </p>
+            <div id="payrollStats" class="payroll-stats"></div>
+            <section class="holiday-card" aria-labelledby="holidayTitle">
+              <div>
+                <h3 id="holidayTitle">Festivos adicionales</h3>
+                <p class="muted">
+                  Los domingos trabajados ya cuentan como festivos. Añade aquí los festivos locales,
+                  autonómicos o nacionales.
+                </p>
+              </div>
+              <div class="holiday-entry">
+                <label>Fecha festiva<input id="holidayDate" type="date" /></label
+                ><label
+                  >Nombre<input
+                    id="holidayName"
+                    maxlength="80"
+                    placeholder="Ej. Fiesta local" /></label
+                ><button class="button primary" id="addHoliday" type="button">
+                  Añadir festivo
+                </button>
+              </div>
+              <div id="holidayList" class="holiday-list"></div>
+            </section>
+            <div class="payroll-table-wrap">
+              <table class="data-table payroll-table">
+                <thead>
+                  <tr>
+                    <th>Código</th>
+                    <th>Concepto</th>
+                    <th>Precio</th>
+                    <th>Cantidad</th>
+                    <th>Devengos</th>
+                  </tr>
+                </thead>
+                <tbody id="payrollLines"></tbody>
+              </table>
+            </div>
+            <div class="payroll-actions">
+              <button class="button primary" id="savePayrollAdjustments" type="button">
+                Guardar precios y cantidades</button
+              ><button
+                class="button subtle payroll-reset"
+                id="resetPayrollQuantities"
+                type="button"
+              >
+                Usar cantidades automáticas del calendario
+              </button>
+            </div>
+            <div class="payroll-total">
+              <span>Total devengos estimado</span><strong id="payrollGross">0,00 €</strong>
+            </div>
+            <p class="field-help">
+              No incluye todavía cotizaciones, IRPF, vacaciones, finiquito ni pagas extraordinarias.
+              Se irán incorporando al afinar el cálculo con más nóminas.
+            </p>
+          </div>
+        </section>
+
+        <section id="settingsView" class="view" aria-labelledby="settingsTitle">
+          <div class="panel dark-panel section-panel narrow-panel">
+            <span class="eyebrow">Almacenamiento local</span>
+            <h2 id="settingsTitle">Ajustes</h2>
+            <p class="muted">
+              La información permanece en este dispositivo. También puedes vincular una carpeta para
+              mantener allí una copia actualizada de los datos.
+            </p>
+            <div class="storage-card">
+              <div>
+                <strong>Carpeta de guardado</strong>
+                <p id="folderStatus" class="muted">No hay ninguna carpeta vinculada.</p>
+              </div>
+              <div class="settings-actions">
+                <button class="button primary" id="chooseFolder">Elegir carpeta</button>
+                <button class="button" id="saveFolderNow" disabled>Guardar ahora</button>
+                <button class="button danger" id="disconnectFolder" hidden>Desvincular</button>
+              </div>
+              <p class="field-help">
+                El archivo se llama <strong>bilbobus-datos.json</strong>. Si la aplicación solicita
+                permiso de nuevo, bastará con pulsar “Guardar ahora”.
+              </p>
+            </div>
+            <h3 class="settings-subtitle">Copia manual</h3>
+            <div class="settings-actions">
+              <a class="button" href="../public/bilbobus-app.zip" download
+                >Descargar aplicación ZIP</a
+              >
+              <button class="button" id="backupData">Descargar datos JSON</button>
+              <label class="button file-button"
+                >Restaurar copia<input id="restoreData" type="file" accept="application/json,.json"
+              /></label>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div
+      id="contractModal"
+      class="modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="contractModalTitle"
+      hidden
+    >
+      <div class="modal-card">
+        <header class="modal-head">
+          <h2 id="contractModalTitle">Nuevo contrato</h2>
+          <button class="icon-button" data-close="contractModal" aria-label="Cerrar">×</button>
+        </header>
+        <form id="contractForm" class="modal-body" novalidate>
+          <input id="contractId" type="hidden" />
+          <div class="two-columns">
+            <label>Fecha de inicio<input id="contractStart" type="date" required /></label>
+            <label>Fecha de fin<input id="contractEnd" type="date" required /></label>
+          </div>
+          <label
+            >Horas semanales contratadas<input
+              id="contractWeekly"
+              inputmode="decimal"
+              placeholder="26,8"
+              required
+          /></label>
+          <label
+            >Nombre o nota del contrato<input
+              id="contractName"
+              maxlength="120"
+              placeholder="Ej. Contrato de verano"
+          /></label>
+          <div id="contractPreview" class="preview" aria-live="polite"></div>
+          <div class="modal-actions">
+            <button id="deleteContract" class="button danger" type="button">Eliminar</button>
+            <span class="spacer"></span>
+            <button class="button" type="button" data-close="contractModal">Cancelar</button>
+            <button class="button primary" type="submit">Guardar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div
+      id="dayModal"
+      class="modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="dayModalTitle"
+      hidden
+    >
+      <div class="modal-card">
+        <header class="modal-head">
+          <div>
+            <h2 id="dayModalTitle">Registrar jornada</h2>
+            <p id="daySubtitle"></p>
+          </div>
+          <button class="icon-button" data-close="dayModal" aria-label="Cerrar">×</button>
+        </header>
+        <form id="dayForm" class="modal-body" novalidate>
+          <input id="dayDate" type="hidden" />
+          <label
+            >Nombre del turno<input id="shiftName" maxlength="80" placeholder="T1, T2, Noche..."
+          /></label>
+          <fieldset>
+            <legend>Tramo 1</legend>
+            <div class="two-columns">
+              <label>Entrada<input id="start1" type="time" required /></label
+              ><label>Salida<input id="end1" type="time" required /></label>
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend>Tramo 2 <span class="muted">(opcional)</span></legend>
+            <div class="two-columns">
+              <label>Entrada<input id="start2" type="time" /></label
+              ><label>Salida<input id="end2" type="time" /></label>
+            </div>
+            <p class="field-help">
+              También se asigna al día en que comenzó la jornada, aunque cruce medianoche.
+            </p>
+          </fieldset>
+          <div id="dayPreview" class="preview" aria-live="polite"></div>
+          <label
+            >Notas<textarea
+              id="dayNote"
+              rows="3"
+              maxlength="500"
+              placeholder="Turno nocturno, formación..."
+            ></textarea>
+          </label>
+          <div class="modal-actions">
+            <button id="deleteDay" class="button danger" type="button">Borrar</button
+            ><span class="spacer"></span
+            ><button class="button" type="button" data-close="dayModal">Cancelar</button
+            ><button class="button primary" type="submit">Guardar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>

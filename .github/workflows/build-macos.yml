@@ -1,0 +1,75 @@
+name: Crear aplicación para Mac
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/build-macos.yml"
+      - "electron/**"
+      - "public/bilbobus/**"
+      - "public/bilbobus-app.zip"
+      - "package.json"
+
+permissions:
+  contents: read
+
+jobs:
+  dmg:
+    name: DMG ${{ matrix.arch }}
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - arm64
+          - x64
+
+    steps:
+      - name: Descargar el proyecto
+        uses: actions/checkout@v4
+
+      - name: Preparar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Instalar dependencias
+        run: npm install
+
+      - name: Crear la aplicación
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npm run desktop:pack -- --${{ matrix.arch }}
+
+      - name: Firmar localmente y crear el DMG
+        shell: bash
+        run: |
+          APP_PATH="$(find release -maxdepth 2 -type d -name 'Bilbobus.app' -print -quit)"
+          if [ -z "$APP_PATH" ]; then
+            echo "No se encontró Bilbobus.app"
+            exit 1
+          fi
+
+          codesign --force --deep --sign - "$APP_PATH"
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+
+          STAGING_DIR="$(mktemp -d)"
+          cp -R "$APP_PATH" "$STAGING_DIR/Bilbobus.app"
+          ln -s /Applications "$STAGING_DIR/Applications"
+
+          hdiutil create \
+            -volname "Bilbobus" \
+            -srcfolder "$STAGING_DIR" \
+            -ov \
+            -format UDZO \
+            "release/Bilbobus-mac-${{ matrix.arch }}.dmg"
+
+      - name: Publicar instalador
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bilbobus-mac-${{ matrix.arch }}
+          path: release/Bilbobus-mac-${{ matrix.arch }}.dmg
+          if-no-files-found: error
+          retention-days: 30
